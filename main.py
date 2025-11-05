@@ -5,6 +5,16 @@ from PIL import Image
 import yaml
 from pathlib import Path
 import logging
+import time
+FORBIDDEN_PHRASES = [
+    "la imagen contiene",
+    "el texto dice",
+    "esta imagen muestra",
+    "en formato markdown",
+    "lista de subtítulos",
+    "bloques de texto",
+    "el contenido del documento",
+]
 
 
 class DeepSeekOCRProcessor:
@@ -16,89 +26,91 @@ class DeepSeekOCRProcessor:
             mm_processor_cache_gb=0,
             logits_processors=[NGramPerReqLogitsProcessor],
         )
+        self.sampling_param = SamplingParams(
+            temperature=0.0,
+            max_tokens=8192,
+            extra_args=dict(
+                ngram_size=30,
+                window_size=90,
+                whitelist_token_ids={128821, 128822},
+            ),
+            skip_special_tokens=False,
+        )
         logging.info("Modelo DeepSeek-OCR cargado.")
+
+    def _is_output_valid(self, text: str) -> bool:
+        """Verifica si la salida del modelo parece una alucinación."""
+        text_lower = text.lower()
+        for phrase in FORBIDDEN_PHRASES:
+            if phrase in text_lower:
+                logging.warning(
+                    f"Posible alucinación detectada. Frase encontrada: '{phrase}'"
+                )
+                return False
+        return True
 
     def process_pdf(self, pdf_path: Path, output_path: Path) -> bool:
         """
-        Procesa un PDF con DeepSeek-OCR y guarda directamente el Markdown.
-
-        Args:
-            pdf_path: Ruta al archivo PDF de entrada
-            output_path: Ruta donde guardar el Markdown
-
-        Returns:
-            True si el procesamiento fue exitoso, False en caso contrario
+        Procesa un PDF con DeepSeek-OCR página por página y guarda el Markdown.
         """
         try:
-            logging.info(f"Processing PDF '{pdf_path.name}' with DeepSeek-OCR...")
-
+            logging.info(f"Procesando PDF '{pdf_path.name}' con DeepSeek-OCR...")
             pdf_document = fitz.open(pdf_path)
             total_pages = len(pdf_document)
 
-            model_input = []
-            prompt = (
-                "<image>\n"
-                "Realiza OCR del texto en español de esta imagen.\n\n"
-                "REGLAS ESTRICTAS:\n"
-                "1. Transcribe ÚNICAMENTE el texto visible en la imagen, palabra por palabra\n"
-                "2. Usa formato Markdown para preservar la estructura (títulos con #, listas con -, negritas con **, etc.)\n"
-                "3. NO añadas explicaciones, comentarios, ni texto que no esté en la imagen\n"
-                "4. NO escribas frases como 'Esta imagen contiene...', 'El texto dice...', etc.\n"
-                "5. Comienza directamente con el contenido transcrito\n"
-                "6. Si hay tablas, usa formato Markdown de tablas\n"
-                "7. Respeta saltos de línea y espaciado del original\n\n"
-                "Transcripción:"
-            )
-
-            for page_number in range(total_pages):
-                logging.info(
-                    f"Converting page {page_number + 1}/{total_pages} to image..."
-                )
-                page = pdf_document.load_page(page_number)
-
-                zoom = 4.0
-                matrix = fitz.Matrix(zoom, zoom)
-                pixmap = page.get_pixmap(matrix=matrix)
-                image = Image.frombytes(
-                    "RGB", [pixmap.width, pixmap.height], pixmap.samples
-                )
-
-                model_input.append(
-                    {"prompt": prompt, "multi_modal_data": {"image": image}}
-                )
-
-            pdf_document.close()
-
-            if not model_input:
-                logging.warning("No pages extracted.")
-                return False
-
-            sampling_param = SamplingParams(
-                temperature=0.0,
-                max_tokens=8192,
-                extra_args=dict(
-                    ngram_size=30,
-                    window_size=90,
-                    whitelist_token_ids={128821, 128822},
-                ),
-                skip_special_tokens=False,
-            )
-
-            logging.info("Sending pages to model for OCR...")
-            model_outputs = self.llm.generate(model_input, sampling_param)
-            logging.info("OCR processing completed.")
-
             with open(output_path, "w", encoding="utf-8") as f:
-                for i, output in enumerate(model_outputs, 1):
-                    page_text = output.outputs[0].text.strip()
+                for page_number in range(total_pages):
+                    page_index = page_number + 1
+                    logging.info(f"Procesando página {page_index}/{total_pages}...")
+
+                    page = pdf_document.load_page(page_number)
+
+                    zoom = 4.0
+                    matrix = fitz.Matrix(zoom, zoom)
+                    pixmap = page.get_pixmap(matrix=matrix)
+                    image = Image.frombytes(
+                        "RGB", [pixmap.width, pixmap.height], pixmap.samples
+                    )
+
+                    prompt_template = (
+                        "<image>\n"
+                        "Eres un sistema experto de OCR. Tu única tarea es transcribir el texto en español de la imagen a formato Markdown.\n"
+                        "Estás procesando la página {page_number} de un total de {total_pages}.\n\n"
+                        "REGLAS ABSOLUTAS:\n"
+                        "1. Transcribe textualmente. NO resumas, expliques ni añadas contenido que no esté en la imagen.\n"
+                        "2. Preserva la estructura original usando Markdown (títulos con '#', listas con '-', negritas con '**', tablas con formato de tabla Markdown).\n"
+                        "3. No incluyas frases como 'El texto dice...' o 'La imagen contiene...'. Comienza directamente con la transcripción.\n\n"
+                        "COMIENZA LA TRANSCRIPCIÓN AHORA:"
+                    )
+                    prompt = prompt_template.format(
+                        page_number=page_index, total_pages=total_pages
+                    )
+
+                    model_input = [
+                        {"prompt": prompt, "multi_modal_data": {"image": image}}
+                    ]
+
+                    max_retries = 2
+                    for attempt in range(max_retries):
+                        model_outputs = self.llm.generate(
+                            model_input, self.sampling_param
+                        )
+                        page_text = model_outputs[0].outputs[0].text.strip()
+
+                        if self._is_output_valid(page_text):
+                            break  
+                        else:
+                            logging.warning(
+                                f"Reintentando página {page_index} (Intento {attempt + 1}/{max_retries})..."
+                            )
+                            time.sleep(1)
 
                     metadata = {
-                        "page": i,
+                        "page": page_index,
                         "total_pages": total_pages,
                         "source": pdf_path.name,
                         "processor": "DeepSeek-OCR",
                     }
-
                     frontmatter = yaml.dump(
                         metadata, default_flow_style=False, allow_unicode=True
                     )
@@ -106,15 +118,21 @@ class DeepSeekOCRProcessor:
                     f.write(frontmatter)
                     f.write("---\n\n")
                     f.write(page_text)
-        
-                    if i < total_pages:
+
+                    if page_index < total_pages:
                         f.write("\n\n")
 
-            logging.info(f"Successfully processed {total_pages} pages to {output_path}")
+            pdf_document.close()
+            logging.info(
+                f"Procesadas exitosamente {total_pages} páginas en '{output_path}'"
+            )
             return True
 
         except Exception as e:
-            logging.error(f"DeepSeek-OCR processing failed for {pdf_path.name}: {e}")
+            logging.error(
+                f"El procesamiento con DeepSeek-OCR falló para {pdf_path.name}: {e}",
+                exc_info=True,
+            )
             return False
 
 
