@@ -38,11 +38,16 @@ class DeepSeekOCRProcessor:
             model_input = []
             prompt = (
                 "<image>\n"
-                "Your task is to perform Optical Character Recognition (OCR). "
-                "Transcribe the text from the image verbatim. "
-                "Do not add, infer, or generate any content that is not explicitly written in the image. "
-                "Preserve the original structure as much as possible using Markdown. "
-                "Your sole function is transcription."
+                "Realiza OCR del texto en español de esta imagen.\n\n"
+                "REGLAS ESTRICTAS:\n"
+                "1. Transcribe ÚNICAMENTE el texto visible en la imagen, palabra por palabra\n"
+                "2. Usa formato Markdown para preservar la estructura (títulos con #, listas con -, negritas con **, etc.)\n"
+                "3. NO añadas explicaciones, comentarios, ni texto que no esté en la imagen\n"
+                "4. NO escribas frases como 'Esta imagen contiene...', 'El texto dice...', etc.\n"
+                "5. Comienza directamente con el contenido transcrito\n"
+                "6. Si hay tablas, usa formato Markdown de tablas\n"
+                "7. Respeta saltos de línea y espaciado del original\n\n"
+                "Transcripción:"
             )
 
             for page_number in range(total_pages):
