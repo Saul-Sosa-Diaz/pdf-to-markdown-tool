@@ -74,13 +74,10 @@ class DeepSeekOCRProcessor:
 
                     prompt_template = (
                         "<image>\n"
-                        "Eres un sistema experto de OCR. Tu única tarea es transcribir el texto en español de la imagen a formato Markdown.\n"
-                        "Estás procesando la página {page_number} de un total de {total_pages}.\n\n"
-                        "REGLAS ABSOLUTAS:\n"
-                        "1. Transcribe textualmente. NO resumas, expliques ni añadas contenido que no esté en la imagen.\n"
-                        "2. Preserva la estructura original usando Markdown (títulos con '#', listas con '-', negritas con '**', tablas con formato de tabla Markdown).\n"
-                        "3. No incluyas frases como 'El texto dice...' o 'La imagen contiene...'. Comienza directamente con la transcripción.\n\n"
-                        "COMIENZA LA TRANSCRIPCIÓN AHORA:"
+                        "Extrae el texto en español de la imagen y formatéalo en Markdown. "
+                        "Conserva la estructura original del documento (títulos, listas, tablas). "
+                        "No añadas comentarios ni texto que no esté en la imagen.\n\n"
+                        "--- TEXTO EXTRAÍDO ---\n"
                     )
                     prompt = prompt_template.format(
                         page_number=page_index, total_pages=total_pages
