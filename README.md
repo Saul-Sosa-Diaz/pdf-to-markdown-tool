@@ -8,3 +8,13 @@ total_pages: 5
 source: document.pdf
 processor: DeepSeek-OCR
 ```
+
+# Installation
+
+```bash
+uv venv
+source .venv/bin/activate
+# Until v0.11.1 release, you need to install vLLM from nightly build
+uv pip install -U vllm --pre --extra-index-url https://wheels.vllm.ai/nightly "triton-kernels@git+https://github.com/triton-lang/triton.git@v3.5.0#subdirectory=python/triton_kernels"
+pip install -r requirements.txt
+```
