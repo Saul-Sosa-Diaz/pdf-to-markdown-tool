@@ -87,7 +87,6 @@ class DeepSeekOCRProcessor:
                 for i, output in enumerate(model_outputs, 1):
                     page_text = output.outputs[0].text.strip()
 
-                    # Crear metadata compatible con MarkdownParser
                     metadata = {
                         "page": i,
                         "total_pages": total_pages,
